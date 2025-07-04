@@ -2,7 +2,7 @@ from fastapi import APIRouter, UploadFile, File
 from PIL import Image
 import torch
 from torchvision import transforms
-from app.models.dummy_model import DummyClassifier
+from app.feature_generator.feature_generator import DummyClassifier
 import io
 
 router = APIRouter()
