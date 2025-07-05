@@ -1,6 +1,7 @@
-fastapi
+fastapi~=0.115.14
 uvicorn
-torch
-torchvision
-pillow
-pandas
+torch~=2.7.1
+torchvision~=0.22.1
+pillow~=11.3.0
+pandas~=2.3.0
+torchaudio~=2.7.1

@@ -1,0 +1,10 @@
+filepath,modality,split,category
+data/images/cat1.jpg,images,train,cat
+data/images/cat2.jpg,images,val,cat
+data/images/dog1.jpg,images,test,dog
+data/text/news1.txt,text,train,news
+data/text/news2.txt,text,val,news
+data/audio/speech1.wav,audio,train,speech
+data/audio/music1.wav,audio,val,music
+data/videos/demo1.mp4,videos,train,action
+data/videos/demo2.mp4,videos,test,drama
