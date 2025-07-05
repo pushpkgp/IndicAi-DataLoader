@@ -1,0 +1,3 @@
+filepath,modality,split,category
+data/text/news1.txt,text,train,news
+data/text/news2.txt,text,val,news

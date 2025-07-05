@@ -1,0 +1,4 @@
+filepath,modality,split,category
+data/images/cat1.png,images,train,cat
+data/images/cat2.jpg,images,val,cat
+data/images/dog1.jpg,images,test,dog

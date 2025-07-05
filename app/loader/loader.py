@@ -19,7 +19,7 @@ class StreamingDatasetLoader(IterableDataset):
             self.df = self.df[self.df['category'] == category]
 
         before = len(self.df)
-        self.df = self.df[self.df["filepath"].apply(os.path.exists)].to_parquet("index.valid.parquet")
+        self.df = self.df[self.df["filepath"].apply(os.path.exists)]
         dropped = before - len(self.df)
         if dropped > 0:
             logger.warning(f"Skipped {dropped} missing files in dataset")
