@@ -1,4 +1,7 @@
 filepath,modality,split,category
-data/images/cat1.png,images,train,cat
-data/images/cat2.jpg,images,val,cat
-data/images/dog1.jpg,images,test,dog
+data/images/chest/ct/cat1.png,image,train,cat
+data/images/chest/ct/cat1.png,image,test,cat
+data/images/chest/ct/cat1.png,image,val,cat
+data/images/chest/x-ray/cat2.png,image,train,cat
+data/images/chest/x-ray/cat2.png,image,test,cat
+data/images/chest/x-ray/cat2.png,image,val,cat

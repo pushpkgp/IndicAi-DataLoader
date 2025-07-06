@@ -3,9 +3,8 @@ import pandas as pd
 from torch.utils.data import IterableDataset, get_worker_info
 from PIL import Image
 import torchaudio
-import logging
 
-logger = logging.getLogger("dataloader")
+from app.main import logger
 
 
 class StreamingDatasetLoader(IterableDataset):
@@ -45,7 +44,7 @@ class StreamingDatasetLoader(IterableDataset):
             label = row['category']
 
             try:
-                if modality == 'images':
+                if modality == 'image':
                     img = Image.open(filepath).convert('RGB')
                     yield self.transform(img) if self.transform else img, label
 
@@ -58,7 +57,7 @@ class StreamingDatasetLoader(IterableDataset):
                     waveform, sample_rate = torchaudio.load(filepath)
                     yield waveform, label
 
-                elif modality == 'videos':
+                elif modality == 'video':
                     yield filepath, label  # Load externally
             except Exception as e:
                 print(f"Error loading file {filepath}: {e}")

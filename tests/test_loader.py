@@ -1,4 +1,4 @@
-from app.loader.loader import StreamingDatasetLoader
+from app.service.loader import StreamingDatasetLoader
 from torchvision import transforms
 from torch.utils.data import DataLoader
 
@@ -12,7 +12,7 @@ image_transforms = transforms.Compose([
 dataset = StreamingDatasetLoader(
     index_path='data/metadata/image.csv',
     split='train',
-    modality='images',
+    modality='image',
     transform=image_transforms,
     shuffle=False
 )
