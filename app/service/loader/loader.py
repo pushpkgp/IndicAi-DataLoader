@@ -4,7 +4,7 @@ from torch.utils.data import IterableDataset, get_worker_info
 from PIL import Image
 import torchaudio
 
-from app.logging_config import logger
+from app.config.logging_config import logger
 
 
 class StreamingDatasetLoader(IterableDataset):

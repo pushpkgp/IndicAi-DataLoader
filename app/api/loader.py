@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Body
 from torch.utils.data import DataLoader
 
-from app.logging_config import logger
+from app.config.logging_config import logger
 from app.service.loader import StreamingDatasetLoader
 from torchvision import transforms
 
