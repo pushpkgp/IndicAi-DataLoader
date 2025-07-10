@@ -1,10 +1,5 @@
 from fastapi import FastAPI
 from app.api.loader import router as loader_router
-import logging
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("dataloader")
 
 # Create FastAPI app instance
 app = FastAPI(
