@@ -1,0 +1,15 @@
+# config.yaml
+app:
+  name: DataLoaderAPI
+  host: 0.0.0.0
+  port: 8000
+  debug: true
+
+paths:
+  index_csv: data/metadata/image.csv
+  val_images: data/metadata/image.csv
+
+model:
+  input_shape: [256, 256, 3]
+  learning_rate: 0.001
+  dilation_rate: 2

@@ -7,7 +7,7 @@ import torchaudio
 from app.config.logging_config import logger
 
 
-class StreamingDatasetLoader(IterableDataset):
+class DataLoader(IterableDataset):
     def __init__(self, index_path, split='train', modality=None, category=None, transform=None, shuffle=True):
         self.df = pd.read_csv(index_path)
         if split:
