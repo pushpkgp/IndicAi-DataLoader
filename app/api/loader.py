@@ -2,7 +2,7 @@ from fastapi import APIRouter, Body
 from torch.utils.data import DataLoader
 
 from app.config.logging_config import logger
-from app.service.loader import StreamingDatasetLoader
+from app.service.loader.loader import IndicDataLoader
 from torchvision import transforms
 
 router = APIRouter()
@@ -19,7 +19,7 @@ def load_dataset(
             transforms.ToTensor()
         ]) if modality == 'image' else None
 
-        dataset = StreamingDatasetLoader(
+        dataset = IndicDataLoader(
             index_path=index_path,
             split=split,
             modality=modality,

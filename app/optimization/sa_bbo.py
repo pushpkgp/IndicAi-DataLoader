@@ -8,6 +8,8 @@ from skimage.metrics import peak_signal_noise_ratio
 import cv2
 from app.config.config import Config
 
+from joblib import Parallel, delayed
+
 def process_image(img_path, model):
     try:
         original_image = cv2.imread(img_path)
@@ -25,14 +27,15 @@ def process_image(img_path, model):
         print(f" Error processing {img_path}: {e}")
         return None
 
-def objective_func(x):
-    dilation_rate = x[0].astype('int32')
+def objective_func(x, input_shape):
+    val = max(1, x[0].astype('int32'))
+    dilation_rate = (val, val)
     learning_rate = x[1]
-    input_shape = (256, 256, 3)
+
+    model = fcn_model(input_shape, dilation_rate, learning_rate)
 
     # Directory containing validation images
     val_dir = Config().get_path("val_images")
-
 
     # Get list of image file paths (first 10 only)
     image_files = sorted([os.path.join(val_dir, f) for f in os.listdir(val_dir)
@@ -41,8 +44,6 @@ def objective_func(x):
     if not image_files:
         print("No validation images found.")
         return float('inf')  # Return poor score
-
-    model = fcn_model(input_shape, dilation_rate, learning_rate)
 
     psnr_scores = []
     with ThreadPoolExecutor(max_workers=4) as executor:
@@ -58,7 +59,7 @@ def objective_func(x):
 
     return 1 / np.mean(psnr_scores)
 
-def sa_bbo(lb, ub, pop_size, prob_size, epochs):
+def sa_bbo(lb, ub, pop_size, prob_size, epochs, input_shape):
     population = np.random.uniform(lb, ub, size=(pop_size, prob_size))
     lb = np.array(lb)
     ub = np.array(ub)
@@ -67,17 +68,19 @@ def sa_bbo(lb, ub, pop_size, prob_size, epochs):
     w_min = 0.1
     w_max = 1
     pi = np.pi
+
     for epoch in range(epochs):
         theta_k = epoch / epochs
+        population = np.clip(population, lb, ub)
+
+        # Evaluate fitness in parallel
+        fitnesses = Parallel(n_jobs=4)(delayed(objective_func)(ind, input_shape) for ind in population)
+
+        best_idx = np.argmin(fitnesses)
+        best_fitness = fitnesses[best_idx]
+        best_solution = population[best_idx]
+
         for j in range(pop_size):
-            population[j, population[j] < lb] = lb[population[j] < lb]
-            population[j, population[j] > ub] = ub[population[j] > ub]
-            fitness = objective_func(population[j])
-
-            if fitness < best_fitness:
-                best_solution = population[j]
-                best_fitness = fitness
-
             # pedal scent marking behaviour
             if 0 < theta_k <= epochs / 3:
                 # Update based on characteristic gait while walking
@@ -105,7 +108,7 @@ def sa_bbo(lb, ub, pop_size, prob_size, epochs):
                 population[j] = population[j] + angular_velocity * (best_solution - abs(population[j])) - angular_velocity * (population[j] - abs(population[j]))
 
             # sniffing behaviour
-            if np.random.rand() < objective_func(population[j]):
+            if np.random.rand() < objective_func(population[j], input_shape):
                 lamb = np.random.uniform(0, 1)
                 population[j] = population[j] + lamb * (np.max(population) - np.min(population))
 

@@ -1,19 +1,25 @@
 import os
+
+import numpy as np
 import pandas as pd
 from torch.utils.data import IterableDataset, get_worker_info
 from PIL import Image
 import torchaudio
 
 from app.config.logging_config import logger
+from app.service.generator.feature_generator import generate_features, FeatureGenerator
 
 
-class DataLoader(IterableDataset):
+class IndicDataLoader(IterableDataset):
     def __init__(self, index_path, split='train', modality=None, category=None, transform=None, shuffle=True):
         self.df = pd.read_csv(index_path)
+
         if split:
             self.df = self.df[self.df['split'] == split]
+
         if modality:
             self.df = self.df[self.df['modality'] == modality]
+
         if category:
             self.df = self.df[self.df['category'] == category]
 
@@ -47,6 +53,8 @@ class DataLoader(IterableDataset):
                 if modality == 'image':
                     img = Image.open(filepath).convert('RGB')
                     yield self.transform(img) if self.transform else img, label
+                    feature = generate_features(filepath)
+                    print(feature)
 
                 elif modality == 'text':
                     with open(filepath, 'r', encoding='utf-8') as f:

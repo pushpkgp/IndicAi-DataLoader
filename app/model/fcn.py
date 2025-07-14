@@ -19,7 +19,7 @@ def fcn_model(input_shape, dilation_rate, learning_rate):
     inputs = tf.keras.layers.Input(shape=input_shape)
 
     # Convolutional layers  # dilation_rate added
-    conv1 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same', dilation_rate=(dilation_rate, dilation_rate))(inputs)
+    conv1 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same', dilation_rate=dilation_rate)(inputs)
     conv2 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same')(conv1)
     pool1 = tf.keras.layers.AveragePooling2D((2, 2))(conv2) # instead of max pooling
 

@@ -11,3 +11,5 @@ scikit-image~=0.24.0
 tensorflow~=2.19.0
 PyYAML~=6.0.2
 uvicorn~=0.35.0
+joblib~=1.5.1
+PyWavelets>=1.4.1
