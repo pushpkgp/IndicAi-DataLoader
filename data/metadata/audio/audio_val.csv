@@ -1,0 +1,3 @@
+filepath,modality,split,category
+data/audio/speech1.wav,audio,train,speech
+data/audio/music1.wav,audio,val,music

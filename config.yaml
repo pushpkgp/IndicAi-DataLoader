@@ -6,7 +6,7 @@ app:
   debug: true
 
 paths:
-  index_csv: data/metadata/image.csv
+  index_csv: data/metadata/train.csv
   val_images: data/images/chest/ct
 
 model:

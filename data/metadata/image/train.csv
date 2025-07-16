@@ -1,0 +1,3 @@
+filepath,label,modality,split,category
+data/images/chest/ct/train/normal/cat0.png,data/images/chest/ct/train/normal,image,train,cat
+data/images/chest/x-ray/train/adenocarcinoma/cat3.png,data/images/chest/x-ray/train/adenocarcinoma,image,train,cat

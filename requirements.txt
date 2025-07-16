@@ -1,9 +1,7 @@
 fastapi~=0.115.14
 torch~=2.7.1
 torchvision~=0.22.1
-pillow~=11.3.0
 pandas~=2.3.0
-torchaudio~=2.7.1
 numpy~=2.0.2
 requests~=2.32.4
 opencv-python~=4.12.0.88
@@ -12,4 +10,4 @@ tensorflow~=2.19.0
 PyYAML~=6.0.2
 uvicorn~=0.35.0
 joblib~=1.5.1
-PyWavelets>=1.4.1
+scikit-learn~=1.6.1

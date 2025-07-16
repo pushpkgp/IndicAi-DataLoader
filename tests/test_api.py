@@ -5,7 +5,7 @@ url = "http://localhost:8000/api/load/images"
 
 # Define the request payload
 payload = {
-    "index_path": "data/metadata/image.csv",
+    "index_path": "data/metadata/train.csv",
     "modality": "image",
     "split": "train"
 }

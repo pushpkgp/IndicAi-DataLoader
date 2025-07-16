@@ -60,7 +60,8 @@ def objective_func(x, input_shape):
     return 1 / np.mean(psnr_scores)
 
 def sa_bbo(lb, ub, pop_size, prob_size, epochs, input_shape):
-    population = np.random.uniform(lb, ub, size=(pop_size, prob_size))
+    population = np.round(np.random.uniform(lb, ub, size=(pop_size, prob_size)), 4)
+
     lb = np.array(lb)
     ub = np.array(ub)
     best_solution = None
@@ -74,13 +75,28 @@ def sa_bbo(lb, ub, pop_size, prob_size, epochs, input_shape):
         population = np.clip(population, lb, ub)
 
         # Evaluate fitness in parallel
-        fitnesses = Parallel(n_jobs=4)(delayed(objective_func)(ind, input_shape) for ind in population)
+        # fitnesses = Parallel(n_jobs=4)(delayed(objective_func)(ind, input_shape) for ind in population)
 
-        best_idx = np.argmin(fitnesses)
-        best_fitness = fitnesses[best_idx]
-        best_solution = population[best_idx]
+        # fitnesses=[]
+        # with ThreadPoolExecutor(max_workers=4) as executor:
+        #     futures = [executor.submit(objective_func, ind, input_shape) for ind in population]
+        #     for future in futures:
+        #         fitness = future.result()
+        #         if fitness is not None:
+        #             fitnesses.append(fitness)
+        #
+        # best_idx = np.argmin(fitnesses)
+        # best_fitness = fitnesses[best_idx]
+        # best_solution = population[best_idx]
 
         for j in range(pop_size):
+
+            fitness = objective_func(population[j], input_shape)
+
+            if fitness < best_fitness:
+                best_solution = population[j]
+                best_fitness = fitness
+
             # pedal scent marking behaviour
             if 0 < theta_k <= epochs / 3:
                 # Update based on characteristic gait while walking

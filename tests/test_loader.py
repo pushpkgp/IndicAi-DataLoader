@@ -10,7 +10,7 @@ image_transforms = transforms.Compose([
 
 # Initialize dataset
 dataset = StreamingDatasetLoader(
-    index_path='data/metadata/image.csv',
+    index_path='data/metadata/train.csv',
     split='train',
     modality='image',
     transform=image_transforms,

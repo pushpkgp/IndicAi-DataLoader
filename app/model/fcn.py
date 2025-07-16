@@ -3,6 +3,15 @@ import numpy as np
 import cv2
 from tensorflow.keras.optimizers import Adam
 
+from tensorflow.keras.utils import get_file
+
+get_file(
+    fname="densenet121_weights_tf_dim_ordering_tf_kernels_notop.h5",
+    origin="https://storage.googleapis.com/tensorflow/keras-applications/densenet/densenet121_weights_tf_dim_ordering_tf_kernels_notop.h5",
+    cache_subdir="models",
+    file_hash="30ee3e1110167f948a6b9946edeeb738"
+)
+
 # Function to apply segmentation mask to input image
 def apply_mask(image, mask):
     # Convert mask to binary (if necessary)

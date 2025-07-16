@@ -8,8 +8,8 @@ from app.optimization.sa_bbo import sa_bbo
 from app.service.generator.feature_extractor import extract_features
 
 # Transform Image
-def transform(image):
-    return cv2.cvtColor(cv2.resize(cv2.imread(image), (256, 256)), cv2.COLOR_BGR2GRAY)
+def transform(image_path):
+    return cv2.cvtColor(cv2.resize(cv2.imread(image_path), (256, 256)), cv2.COLOR_BGR2GRAY)
 
 # Noise reduction using wavelet thresholding
 def denoise(image):
@@ -56,8 +56,8 @@ def segmentation_model():
     learning_rate = best_solution[1]
     return fcn_model(input_shape, dilation_rate, learning_rate)
 
-def generate_features(image):
-    return extract_features(segment(histogram_equalize(normalize(denoise(transform(image))))))
+def generate_image_features(image_path):
+    return extract_features(segment(histogram_equalize(normalize(denoise(transform(image_path))))))
 
 class FeatureGenerator:
     def __init__(self):
