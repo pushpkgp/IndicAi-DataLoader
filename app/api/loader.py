@@ -3,6 +3,7 @@ from torch.utils.data import DataLoader
 
 from app.config.logging_config import logger
 from app.service.loader.loader import IndicDataLoader
+from app.service.metadata_generator.metadata_generator import MetadataGenerator
 
 router = APIRouter()
 
@@ -34,3 +35,9 @@ def load_dataset(
     except Exception as e:
         logger.error(f"Failed to load dataset: {e}")
         return {"error": str(e)}
+
+@router.post("/load/dataset/path")
+def load_dataset_path(
+        path: str = Body(..., embed=True, description="Path to the dataset")
+):
+        MetadataGenerator(path).generate_and_save_metadata()
