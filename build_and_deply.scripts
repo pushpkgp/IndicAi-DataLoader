@@ -1,0 +1,100 @@
+docker build -t indic-ai-data-connectors:0.0.1 .
+docker images | grep indic-ai-data-connectors
+
+docker login
+docker tag indic-ai-data-connectors:0.1.3 indic1ai/indic-ai-data-connectors:0.0.1
+
+helm lint ./helm/indic-ai-data-connectors-chart
+helm list -A
+helm status indic-ai-data-connectors -n indic-ai-data-connectors
+helm template indic-ai-data-connectors ./helm/indic-ai-data-connectors-chart -n indic-ai-data-connectors
+
+helm uninstall indic-ai-data-connectors -n indic-ai-data-connectors
+helm install indic-ai-data-connectors ./helm/indic-ai-data-connectors-chart -n indic-ai-data-connectors --create-namespace
+helm upgrade indic-ai-data-connectors ./helm/indic-ai-data-connectors-chart -n indic-ai-data-connectors -f ./helm/indic-ai-data-connectors-chart/values.yaml
+minikube image load indic-ai-data-connectors:0.0.1
+
+kubectl delete pod -n indic-ai-data-connectors --all
+kubectl get pods -n indic-ai-data-connectors -w
+
+minikube kubectl -- get po -A
+kubectl get all -n indic-ai-data-connectors
+
+kubectl get pods -n indic-ai-data-connectors
+kubectl port-forward svc/indic-ai-data-connectors 8000:80 -n indic-ai-data-connectors
+kubectl apply -f ./k8s/service.yaml
+
+kubectl describe pod indic-ai-data-connectors-6fb95df6c4-h47zn -n indic-ai-data-connectors
+
+kubectl get pods --all-namespaces
+kubectl get svc -n indic-ai-data-connectors
+
+<service-name>.<namespace>.svc.cluster.local
+http://indic-ai-data-connectors.indic-ai-data-connectors.svc.cluster.local
+
+python3 -m venv airflow_venv
+source airflow_venv/bin/activate
+
+kubectl logs -n indic-ai-data-connectors indic-ai-data-connectors-74445c6b9-n7q7f
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+minikube stop
+minikube start
+eval $(minikube docker-env)
+docker rmi -f indic-ai-data-loader:0.0.1
+docker build -t indic-ai-data-loader:0.0.1 .
+
+helm lint ./helm/indic-ai-data-loader-chart
+helm upgrade indic-ai-data-loader ./helm/indic-ai-data-loader-chart -n indic-ai-data-loader -f ./helm/indic-ai-data-loader-chart/values.yaml
+kubectl rollout restart deployment indic-ai-data-loader -n indic-ai-data-loader
+
+//minikube image load indic-ai-data-loader:0.0.1
+kubectl delete pod -n indic-ai-data-loader --all
+kubectl get pods -n indic-ai-data-loader -w
+
+helm uninstall indic-ai-data-loader -n indic-ai-data-loader
+helm install indic-ai-data-loader ./helm/indic-ai-data-loader-chart -n indic-ai-data-loader --create-namespace
+kubectl logs -n indic-ai-data-loader indic-ai-data-loader-68fbf4547d-sgqfp
+
+kubectl logs indic-ai-data-loader-c7c5fd45d-g8s8z -n indic-ai-data-loader --previous
+
+kubectl port-forward -n indic-ai-data-loader pod/indic-ai-data-loader-68fbf4547d-sgqfp 9080:8000
+
+kubectl exec -it indic-ai-data-loader-7b94849688-wlkmh -n indic-ai-data-loader -- bash
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+minikube stop
+minikube start
+
+chmod -R +r /Users/pushpinderrana/IndicAI/data/raw
+chmod -R +r /Users/pushpinderrana/IndicAI/data/metadata/image
+chmod -R +r /Users/pushpinderrana/IndicAI/data/features/image
+
+minikube mount \
+/Users/pushpinderrana/IndicAI/data/raw:/data/raw
+
+minikube mount \
+/Users/pushpinderrana/IndicAI/data/metadata/image:/data/metadata/image
+
+minikube mount \
+/Users/pushpinderrana/IndicAI/data/features/image:/data/features/image
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+kubectl describe pod indic-ai-data-loader-5dfbf49b7-kzjqh -n indic-ai-data-loader
+
+{
+  "name": "Raw",
+  "type": "Directory",
+  "data_source_path": "~/IndicAI/data/raw",
+  "created_by": "pushpinder.rana",
+  "email": "pushpinder.rana@indicailabs.in"
+}
+
+----------------------------------------------------------------------------------------------------------------------------------------------------------------
+echo $DOCKER_HOST
+unset DOCKER_HOST
+
+
+
+curl -X POST http://localhost:9080/api/features \
+  -H "Content-Type: application/json" \
+  -d '{
+    "metadata_base_dir": "/data/metadata/image"
+  }'

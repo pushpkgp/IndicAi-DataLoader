@@ -5,6 +5,9 @@ from tensorflow.keras.applications import DenseNet121
 from tensorflow.keras.applications.densenet import preprocess_input
 from tensorflow.keras.models import Model
 
+from app.service.feature.preprocessor import logger
+
+
 def glcm(image):
     co_matrix = graycomatrix(image, [5], [0], 256, True, True)
 
@@ -102,6 +105,7 @@ def densenet121(image):
     return features
 
 def extract_features(image):
+    logger.info(f"Pushpinder Features: Feature Extraction Start")
     glcm_feature = glcm(image)  # Texture feature
 
     shape_feature = shape_features(image)
@@ -131,4 +135,5 @@ def extract_features(image):
     weighted_deep = deep_feature_normalized * weight_deep
 
     feature = np.concatenate([weighted_glcm, weighted_shape, weighted_intensity, weighted_deep])
+    logger.info(f"Pushpinder Features: Feature Extraction Complete")
     return feature

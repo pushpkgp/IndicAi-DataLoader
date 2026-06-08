@@ -1,3 +1,0 @@
-filepath,modality,split,category
-data/videos/demo1.mp4,video,train,action
-data/videos/demo2.mp4,video,test,drama

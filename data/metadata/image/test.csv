@@ -1,3 +1,0 @@
-filepath,label,modality,split,category
-data/images/chest/ct/cat1.png,data/images/chest/ct/test,image,test,cat
-data/images/chest/x-ray/cat4.png,data/images/chest/x-ray/test,image,test,cat

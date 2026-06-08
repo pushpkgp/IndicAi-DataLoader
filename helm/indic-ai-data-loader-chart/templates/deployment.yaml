@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "indic-ai-data-loader.fullname" . }}
+  labels:
+    app: {{ include "indic-ai-data-loader.name" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ include "indic-ai-data-loader.name" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "indic-ai-data-loader.name" . }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8000
+          env:
+            - name: ENV
+              value: "local"
+          volumeMounts:
+            - name: data-dir
+              mountPath: /data/raw  # <-- path inside your container
+            - name: metadata-dir
+              mountPath: /data/metadata/image
+      volumes:
+        - name: data-dir
+          hostPath:
+            path: /data/raw  # <-- ABSOLUTE path on host node
+            type: Directory
+        - name: metadata-dir
+          hostPath:
+            path: /data/metadata/image  # absolute path on the host node
+            type: DirectoryOrCreate

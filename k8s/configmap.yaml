@@ -1,0 +1,7 @@
+# k8s/configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: indic-ai-data-loader-config
+data:
+  ENV: "production"

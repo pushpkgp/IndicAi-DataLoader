@@ -1,4 +1,4 @@
-from app.service.loader import StreamingDatasetLoader
+from app.service.feature.loader import StreamingDatasetLoader
 from torchvision import transforms
 from torch.utils.data import DataLoader
 

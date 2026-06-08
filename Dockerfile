@@ -4,13 +4,16 @@ WORKDIR /app
 
 COPY . /app
 
+ENV MALLOC_ARENA_MAX=2
+ENV PYTHONUNBUFFERED=1
+
 RUN apt-get update && apt-get install -y \
     libsndfile1-dev \
     libgomp1 \
-    libgl1-mesa-glx \
     libglib2.0-0 \
     psmisc \
     libgl1 \
+    curl \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --upgrade pip \
     && pip install psutil \

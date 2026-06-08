@@ -1,0 +1,13 @@
+replicaCount: 1
+
+image:
+  repository: indic-ai-data-loader
+  tag: 0.0.1
+  pullPolicy: IfNotPresent
+
+service:
+  type: NodePort
+  port: 80
+  targetPort: 8000
+
+resources: {}

@@ -41,4 +41,4 @@ class MetadataGenerator:
             df = pd.DataFrame(rows)
             output_path = metadata_root / f"{split}.csv"
             df.to_csv(output_path, sep="\t", index=False)
-            print(f"✅ Metadata saved: {output_path}")
+            print(f"Metadata saved: {output_path}")

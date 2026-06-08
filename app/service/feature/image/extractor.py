@@ -5,7 +5,8 @@ from skimage.restoration import denoise_wavelet
 
 from app.model.fcn import fcn_model, apply_mask
 from app.optimization.sa_bbo import sa_bbo
-from app.service.generator.feature_extractor import extract_features
+from app.service.feature.image.features import extract_features
+from app.service.feature.preprocessor import logger
 
 # Transform Image
 def transform(image_path):
@@ -30,35 +31,19 @@ def histogram_equalize(normalized_image):
     # cv2.imwrite('Pictorial Results/5. Equalized Image.jpg', equalized_image)
     return equalized_image
 
-def segment(equalized_image):
+def segment(equalized_image, model):
     # Predict segmentation mask using the FCN model
-    segmentation_mask = segmentation_model().predict(np.expand_dims(equalized_image, axis=0))
+    logger.info(f"Pushpinder Features: In Segmentation")
+    segmentation_mask = model.predict(np.expand_dims(equalized_image, axis=0))
 
     # Apply segmentation mask to input image
     segmented_image = apply_mask(equalized_image, segmentation_mask[0])
     # cv2.imwrite('Pictorial Results/6. Segmented Image.jpg', segmented_image)
+    logger.info(f"Pushpinder Features: Segmentation Complete")
     return segmented_image
 
-def segmentation_model():
-    input_shape = (256, 256, 3)
-
-    # Dilation and Learning rates for parameter tuning in FCN
-    lb = [2, 0.0001]
-    ub = [7, 0.001]
-    pop_size = 3
-    prob_size = len(lb)
-    epochs = 100
-
-    best_solution, best_fitness = sa_bbo(lb, ub, pop_size, prob_size, epochs, input_shape)
-
-    val = max(1, best_solution[0].astype('int32'))
-    dilation_rate = (val, val)
-    learning_rate = best_solution[1]
-    return fcn_model(input_shape, dilation_rate, learning_rate)
-
-def generate_image_features(image_path):
-    return extract_features(segment(histogram_equalize(normalize(denoise(transform(image_path))))))
-
-class FeatureGenerator:
-    def __init__(self):
-        super().__init__()
+def extract_image_features(image_path: str, model):
+    logger.info(f"Pushpinder Extracting Image Features for image {image_path}, model: {model}")
+    features = extract_features(segment(histogram_equalize(normalize(denoise(transform(image_path)))), model))
+    logger.info(f"Pushpinder Features {features} for file {image_path}")
+    return features
