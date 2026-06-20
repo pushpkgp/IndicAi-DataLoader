@@ -1,25 +1,86 @@
-import logging
+from __future__ import annotations
 
-from app.model.fcn import fcn_model
-from app.optimization.sa_bbo import sa_bbo
+import logging
+from typing import Dict, Optional, Sequence
+
+import cv2
+import numpy as np
+import tensorflow as tf
+
+from app.model.fcn import apply_mask
+from app.optimization.sa_bbo import e_si_bbo_postprocess, postprocess_mask
 
 logger = logging.getLogger("feature_pipeline")
 
-def get_segmentation_mask_model(reference_images):
-    input_shape = (256, 256, 3)
-    logger.info(f"Pushpinder Segmentation")
+def predict_probability_mask(
+    image: np.ndarray,
+    model: tf.keras.Model,
+    input_size: tuple[int, int] = (256, 256),
+) -> np.ndarray:
+    resized = cv2.resize(image, input_size)
+    x = resized.astype(np.float32) / 255.0
+    x = np.expand_dims(x, axis=0)
 
-    # Dilation and Learning rates for parameter tuning in FCN
-    lb = [2, 0.0001]
-    ub = [7, 0.001]
-    pop_size = 3
-    prob_size = len(lb)
-    epochs = 100
+    pred = model(tf.convert_to_tensor(x, dtype=tf.float32), training=False).numpy()[0]
 
-    best_solution, best_fitness = sa_bbo(lb, ub, pop_size, prob_size, epochs, input_shape, reference_images)
-    logger.info(f"---------->>> best_solution- {best_solution} for best_fitness- {best_fitness}")
+    if pred.ndim == 3:
+        pred = pred[..., 0]
 
-    val = max(1, best_solution[0].astype('int32'))
-    dilation_rate = (val, val)
-    learning_rate = best_solution[1]
-    return fcn_model(input_shape, dilation_rate, learning_rate)
+    return pred.astype(np.float32)
+
+def load_mask(path: str, input_size: tuple[int, int] = (256, 256)) -> np.ndarray:
+    mask = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+    if mask is None:
+        raise FileNotFoundError(f"Mask not found: {path}")
+
+    mask = cv2.resize(mask, input_size)
+    return (mask > 127).astype(np.uint8)
+
+def calibrate_postprocessing_params(
+    model: tf.keras.Model,
+    reference_images: Sequence[str],
+    reference_masks: Sequence[str],
+    max_samples: int = 16,
+) -> Dict[str, object]:
+    prob_masks = []
+    gt_masks = []
+
+    for img_path, mask_path in zip(reference_images[:max_samples], reference_masks[:max_samples]):
+        image = cv2.imread(str(img_path))
+        if image is None:
+            logger.warning("Skipping unreadable image: %s", img_path)
+            continue
+
+        prob_masks.append(predict_probability_mask(image, model))
+        gt_masks.append(load_mask(str(mask_path)))
+
+    if not prob_masks:
+        raise ValueError("No valid image-mask pairs found for E-SI-BBO calibration")
+
+    result = e_si_bbo_postprocess(prob_masks=prob_masks, gt_masks=gt_masks)
+
+    logger.info(
+        "Best E-SI-BBO postprocess params=%s fitness=%s",
+        result.best_params,
+        result.best_fitness,
+    )
+
+    return result.best_params
+
+def segment_image(
+    image: np.ndarray,
+    model: tf.keras.Model,
+    postprocess_params: Optional[Dict[str, object]] = None,
+) -> np.ndarray:
+    params = postprocess_params or {
+        "threshold": 0.5,
+        "morph_kernel": 5,
+        "close_iter": 1,
+        "open_iter": 1,
+        "min_area_ratio": 0.005,
+    }
+
+    prob_mask = predict_probability_mask(image, model)
+    binary_mask = postprocess_mask(prob_mask, params)
+
+    return apply_mask(image, binary_mask, threshold=0.5)

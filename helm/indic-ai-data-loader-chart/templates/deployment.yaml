@@ -24,16 +24,22 @@ spec:
             - name: ENV
               value: "local"
           volumeMounts:
-            - name: data-dir
-              mountPath: /data/raw  # <-- path inside your container
-            - name: metadata-dir
+            - name: raw-data
+              mountPath: /data/raw
+            - name: metadata-image
               mountPath: /data/metadata/image
+            - name: features-image
+              mountPath: /data/features/image
       volumes:
-        - name: data-dir
+        - name: raw-data
           hostPath:
-            path: /data/raw  # <-- ABSOLUTE path on host node
+            path: /data/raw
             type: Directory
-        - name: metadata-dir
+        - name: metadata-image
           hostPath:
-            path: /data/metadata/image  # absolute path on the host node
+            path: /data/metadata/image
+            type: Directory
+        - name: features-image
+          hostPath:
+            path: /data/features/image
             type: DirectoryOrCreate

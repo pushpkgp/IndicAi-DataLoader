@@ -1,65 +1,104 @@
-import tensorflow as tf
-import numpy as np
 import cv2
+import numpy as np
+import tensorflow as tf
 from tensorflow.keras.optimizers import Adam
 
-from tensorflow.keras.utils import get_file
+def apply_mask(image, mask, threshold: float = 0.5):
+    if mask.ndim == 3 and mask.shape[-1] > 1:
+        mask_binary = np.max(mask, axis=-1)
+    elif mask.ndim == 3:
+        mask_binary = mask[..., 0]
+    else:
+        mask_binary = mask
 
-get_file(
-    fname="densenet121_weights_tf_dim_ordering_tf_kernels_notop.h5",
-    origin="https://storage.googleapis.com/tensorflow/keras-applications/densenet/densenet121_weights_tf_dim_ordering_tf_kernels_notop.h5",
-    cache_subdir="models",
-    file_hash="30ee3e1110167f948a6b9946edeeb738"
-)
+    mask_binary = (mask_binary > threshold).astype(np.uint8)
 
-# Function to apply segmentation mask to input image
-def apply_mask(image, mask):
-    # Convert mask to binary (if necessary)
-    mask_binary = np.argmax(mask, axis=-1) if mask.shape[-1] > 1 else (mask > 0.5).astype(np.uint8)
-    # Apply mask to input image
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    mask_binary = mask_binary.astype('uint8')
-    segmented_image = cv2.bitwise_and(image, image, mask=mask_binary)
+    if image.ndim == 3:
+        image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        image_gray = image
+
+    segmented_image = cv2.bitwise_and(image_gray, image_gray, mask=mask_binary)
     return segmented_image
 
-# Define the FCN model
-def fcn_model(input_shape, dilation_rate, learning_rate):
-    # Input layer
+def fcn_model(
+    input_shape=(256, 256, 3),
+    dilation_rate=(1, 1),
+    learning_rate=1e-4,
+    num_filters=64,
+    kernel_size=3,
+    dropout_rate=0.2,
+):
     inputs = tf.keras.layers.Input(shape=input_shape)
 
-    # Convolutional layers  # dilation_rate added
-    conv1 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same', dilation_rate=dilation_rate)(inputs)
-    conv2 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same')(conv1)
-    pool1 = tf.keras.layers.AveragePooling2D((2, 2))(conv2) # instead of max pooling
+    f1 = int(num_filters)
+    f2 = min(f1 * 2, 256)
+    f3 = min(f1 * 4, 512)
 
-    conv3 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same')(pool1)
-    conv4 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same')(conv3)
+    conv1 = tf.keras.layers.Conv2D(
+        f1, (kernel_size, kernel_size), activation="relu",
+        padding="same", dilation_rate=dilation_rate
+    )(inputs)
+    conv1 = tf.keras.layers.BatchNormalization()(conv1)
+    conv1 = tf.keras.layers.Dropout(dropout_rate)(conv1)
+
+    conv2 = tf.keras.layers.Conv2D(
+        f1, (kernel_size, kernel_size), activation="relu", padding="same"
+    )(conv1)
+    pool1 = tf.keras.layers.AveragePooling2D((2, 2))(conv2)
+
+    conv3 = tf.keras.layers.Conv2D(
+        f2, (kernel_size, kernel_size), activation="relu", padding="same"
+    )(pool1)
+    conv3 = tf.keras.layers.BatchNormalization()(conv3)
+
+    conv4 = tf.keras.layers.Conv2D(
+        f2, (kernel_size, kernel_size), activation="relu", padding="same"
+    )(conv3)
     pool2 = tf.keras.layers.AveragePooling2D((2, 2))(conv4)
 
-    conv5 = tf.keras.layers.Conv2D(128, (3, 3), activation='relu', padding='same')(pool2)
-    conv6 = tf.keras.layers.Conv2D(128, (3, 3), activation='relu', padding='same')(conv5)
+    conv5 = tf.keras.layers.Conv2D(
+        f3, (kernel_size, kernel_size), activation="relu", padding="same"
+    )(pool2)
+    conv5 = tf.keras.layers.BatchNormalization()(conv5)
 
-    # Transposed convolutional layers for upsampling
-    upsample1 = tf.keras.layers.Conv2DTranspose(64, (3, 3), strides=(2, 2), padding='same')(conv6)
-    upsample1 = tf.keras.layers.concatenate([conv4, upsample1], axis=3)
+    conv6 = tf.keras.layers.Conv2D(
+        f3, (kernel_size, kernel_size), activation="relu", padding="same"
+    )(conv5)
 
-    conv7 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same')(upsample1)
-    conv8 = tf.keras.layers.Conv2D(64, (3, 3), activation='relu', padding='same')(conv7)
+    upsample1 = tf.keras.layers.Conv2DTranspose(
+        f2, (kernel_size, kernel_size), strides=(2, 2), padding="same"
+    )(conv6)
+    upsample1 = tf.keras.layers.Concatenate(axis=3)([conv4, upsample1])
 
-    upsample2 = tf.keras.layers.Conv2DTranspose(32, (3, 3), strides=(2, 2), padding='same')(conv8)
-    upsample2 = tf.keras.layers.concatenate([conv2, upsample2], axis=3)
+    conv7 = tf.keras.layers.Conv2D(
+        f2, (kernel_size, kernel_size), activation="relu", padding="same"
+    )(upsample1)
+    conv8 = tf.keras.layers.Conv2D(
+        f2, (kernel_size, kernel_size), activation="relu", padding="same"
+    )(conv7)
 
-    conv9 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same')(upsample2)
-    conv10 = tf.keras.layers.Conv2D(32, (3, 3), activation='relu', padding='same')(conv9)
+    upsample2 = tf.keras.layers.Conv2DTranspose(
+        f1, (kernel_size, kernel_size), strides=(2, 2), padding="same"
+    )(conv8)
+    upsample2 = tf.keras.layers.Concatenate(axis=3)([conv2, upsample2])
 
-    # Output layer
-    outputs = tf.keras.layers.Conv2D(3, (1, 1), activation='softmax')(conv10)
+    conv9 = tf.keras.layers.Conv2D(
+        f1, (kernel_size, kernel_size), activation="relu", padding="same"
+    )(upsample2)
+    conv10 = tf.keras.layers.Conv2D(
+        f1, (kernel_size, kernel_size), activation="relu", padding="same"
+    )(conv9)
 
-    # Create model
+    # Binary lung mask output.
+    outputs = tf.keras.layers.Conv2D(1, (1, 1), activation="sigmoid")(conv10)
+
     model = tf.keras.Model(inputs=inputs, outputs=outputs)
-    # Compile the model -  tune the learning rate
-    model.compile(optimizer=Adam(learning_rate=learning_rate), loss='sparse_categorical_crossentropy', metrics=['accuracy'])
-    # Print model summary
-    model.summary()
+
+    model.compile(
+        optimizer=Adam(learning_rate=learning_rate),
+        loss="binary_crossentropy",
+        metrics=["accuracy"],
+    )
 
     return model

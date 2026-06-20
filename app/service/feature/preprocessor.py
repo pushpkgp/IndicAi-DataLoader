@@ -1,12 +1,11 @@
-import asyncio
+from __future__ import annotations
+
 import json
 import logging
 import os
 import re
-import uuid
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import List, Optional, Tuple, Callable, Dict, Iterable
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -15,12 +14,10 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import LabelEncoder
 
 from app.metadata_cache import get_metadata_files
+from app.model.densnet import get_densenet_extractor
 from app.service.feature.extractor_factory import Factory
-from app.service.feature.image.segmentation import get_segmentation_mask_model
+from app.service.feature.image.model_registry import get_segmentation_assets
 
-# ----------------------------
-# GLOBAL CONFIG (IMPORTANT)
-# ----------------------------
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 pd.options.mode.copy_on_write = True
@@ -28,9 +25,6 @@ pd.options.mode.copy_on_write = True
 logger = logging.getLogger("feature_pipeline")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# ----------------------------
-# METADATA FILENAME PARSER
-# ----------------------------
 FILENAME_PATTERN = re.compile(
     r"^(?P<modality>[^_]+)_"
     r"(?P<bodypart>[^_]+)_"
@@ -42,6 +36,7 @@ FILENAME_PATTERN = re.compile(
 def parse_meta_filename(filename: str) -> Tuple[str, str, str, str, str]:
     stem = Path(filename).stem
     match = FILENAME_PATTERN.match(stem)
+
     if not match:
         raise ValueError(f"Invalid metadata filename format: {filename}")
 
@@ -54,31 +49,20 @@ def parse_meta_filename(filename: str) -> Tuple[str, str, str, str, str]:
         g["category"],
     )
 
-# ----------------------------
-# LABEL MAPPING (SERIAL)
-# ----------------------------
 def build_global_label_mapping(
     csv_files: Iterable[Path],
-    label_map_path: Path
+    label_map_path: Path,
 ):
-
     categories = set()
 
     for f in csv_files:
         try:
             df = pd.read_csv(f, usecols=["category"], dtype=str)
-            # categories.update(df["category"].dropna().unique())
-            clean = (
-                df["category"]
-                .dropna()
-                .str.strip()
-            )
-
+            clean = df["category"].dropna().str.strip()
             clean = clean[clean.str.lower() != "category"]
-
             categories.update(clean.unique())
         except Exception as e:
-            logger.warning(f"Skipping {f.name}: {e}")
+            logger.warning("Skipping %s: %s", f.name, e)
 
     if not categories:
         raise ValueError("No categories found in metadata files")
@@ -89,79 +73,64 @@ def build_global_label_mapping(
     mapping = {label: int(idx) for idx, label in enumerate(le.classes_)}
 
     label_map_path.parent.mkdir(parents=True, exist_ok=True)
-    label_map_path.write_text(json.dumps(mapping))
-    logger.info(f"Label mapping created with {mapping} classes, File Path {label_map_path}")
+    label_map_path.write_text(json.dumps(mapping), encoding="utf-8")
 
-    # logger.info("Label mapping created with %d classes", len(mapping))
+    logger.info("Label mapping created with %s classes at %s", len(mapping), label_map_path)
+
     return le, mapping, categories
 
-# ----------------------------
-# FEATURE EXTRACTION WORKER
-# ----------------------------
-def extract_and_save_feature(
-        row: Dict,
-        extractor_func: Callable,
-        output_dir: Path,
-        prefix: str,
-        model
-) -> Optional[str]:
-    filepath = row["filepath"]
-    if not os.path.exists(filepath):
-        return None
-
-    try:
-        logger.info(f"Pushpinder Extracting Features")
-        feature = extractor_func(row.get("modality"), filepath, model)
-        out_file = output_dir / f"{prefix}_{uuid.uuid4().hex}.npy"
-        np.save(out_file, feature.astype(np.float32).reshape(1, -1))
-        return str(out_file)
-    except Exception as e:
-        logger.error(f"Feature extraction failed for {filepath}: {e}")
-        return None
-
-# ----------------------------
-# PARALLEL FEATURE EXTRACTION
-# ----------------------------
 async def extract_features_parallel(
-        df: pd.DataFrame,
-        extractor_func,
-        model,
-        output_dir: Path,
-        prefix: str,
-        shard_size=2000
-):
+    df: pd.DataFrame,
+    extractor_func: Callable,
+    segmentation_model,
+    postprocess_params: Dict[str, object],
+    output_dir: Path,
+    prefix: str,
+    deep_feature_extraction_model,
+    shard_size: int = 500,
+) -> List[Path]:
     features = []
-    shard_files = []
+    shard_files: List[Path] = []
     shard_idx = 0
 
-    for i, (_, row) in enumerate(df.iterrows(), 1):
-        row = row.to_dict()
-        filepath = row["filepath"]
+    for i, row in enumerate(df.itertuples(index=False), 1):
+        filepath = row.filepath
+        modality = getattr(row, "modality", "image")
 
         if not os.path.exists(filepath):
             continue
 
-        feature = extractor_func(row.get("modality"), filepath, model)
+        try:
+            feature = extractor_func(
+                modality,
+                filepath,
+                segmentation_model,
+                postprocess_params,
+                deep_feature_extraction_model
+            )
 
-        if feature is None:
-            continue
+            if feature is None:
+                continue
 
-        feature = np.asarray(feature, dtype=np.float32).reshape(1, -1)
+            feature = np.asarray(feature, dtype=np.float32).reshape(1, -1)
 
-        # 🔥 CRITICAL: Remove NaN / Inf
-        if not np.isfinite(feature).all():
-            continue
-        features.append(feature)
+            if not np.isfinite(feature).all():
+                logger.warning("Skipping non-finite feature for %s", filepath)
+                continue
 
-        if len(features) >= shard_size:
-            shard_array = np.vstack(features)
-            shard_file = output_dir / f"{prefix}_shard_{shard_idx}.npy"
-            np.save(shard_file, shard_array)
-            shard_files.append(shard_file)
-            features = []
-            shard_idx += 1
+            features.append(feature)
 
-    # Save remaining
+            if len(features) >= shard_size:
+                shard_array = np.vstack(features)
+                shard_file = output_dir / f"{prefix}_shard_{shard_idx}.npy"
+                np.save(shard_file, shard_array)
+                shard_files.append(shard_file)
+                features = []
+                shard_idx += 1
+
+        except Exception as exc:
+            logger.error("Feature extraction failed for %s: %s", filepath, exc)
+
     if features:
         shard_array = np.vstack(features)
         shard_file = output_dir / f"{prefix}_shard_{shard_idx}.npy"
@@ -170,220 +139,233 @@ async def extract_features_parallel(
 
     return shard_files
 
-# ----------------------------
-# PCA
-# ----------------------------
 def run_incremental_pca(
-        shard_files: List[Path],
-        features_dim: int,
-        output_dir: Path,
-        prefix: str
+    shard_files: List[Path],
+    features_dim: int,
+    output_dir: Path,
+    prefix: str,
+    explained_variance: float = 0.99,
 ) -> List[Path]:
+    if not shard_files:
+        raise ValueError("No shard files provided for PCA")
+
     sample = np.load(shard_files[0], mmap_mode="r")
-    print("Sample shape:", sample.shape)
-    print("Sample ndim:", sample.ndim)
-
     n_samples_total = sum(np.load(f, mmap_mode="r").shape[0] for f in shard_files)
+    original_dim = sample.shape[1]
 
-    n_components = min(features_dim, sample.shape[1], n_samples_total)
+    max_components = min(features_dim, original_dim, n_samples_total)
 
-    ipca = IncrementalPCA(n_components=n_components)
+    logger.info(
+        "Running initial IncrementalPCA: max_components=%s, total_samples=%s, original_dim=%s",
+        max_components,
+        n_samples_total,
+        original_dim,
+    )
 
-    # ---- FIRST PASS: FIT ----
+    ipca_full = IncrementalPCA(n_components=max_components)
+
+    for f in shard_files:
+        batch = np.load(f, mmap_mode="r")
+        ipca_full.partial_fit(batch)
+
+    cumulative_variance = np.cumsum(ipca_full.explained_variance_ratio_)
+
+    selected_components = int(np.searchsorted(cumulative_variance, explained_variance) + 1)
+
+    selected_components = min(selected_components, max_components)
+
+    logger.info(
+        "PCA selected %s components to preserve %.2f%% variance",
+        selected_components,
+        explained_variance * 100,
+    )
+
+    ipca = IncrementalPCA(n_components=selected_components)
+
     for f in shard_files:
         batch = np.load(f, mmap_mode="r")
         ipca.partial_fit(batch)
 
-    # ---- SECOND PASS: TRANSFORM ----
     reduced_files = []
+
     for f in shard_files:
         batch = np.load(f, mmap_mode="r")
         reduced = ipca.transform(batch)
+
         out = output_dir / f"{prefix}_{f.stem}_pca.npy"
         np.save(out, reduced.astype(np.float32))
         reduced_files.append(out)
 
+    pca_info = {
+        "original_dim": int(original_dim),
+        "max_components": int(max_components),
+        "selected_components": int(selected_components),
+        "explained_variance_target": float(explained_variance),
+        "explained_variance_actual": float(cumulative_variance[selected_components - 1]),
+    }
+
+    with open(output_dir / f"{prefix}_pca_info.json", "w") as f:
+        json.dump(pca_info, f, indent=2)
+
+    logger.info("Saved PCA info: %s", pca_info)
+
     return reduced_files
 
-# ----------------------------
-# PER-METADATA FILE PIPELINE
-# ----------------------------
 async def process_metadata_file(
-        metadata_file: Path,
-        output_dir: Path,
-        executor: ProcessPoolExecutor,
-        extractor_func,
-        model,
-):
-    df = pd.read_csv(metadata_file)
+    metadata_file: Path,
+    output_dir: Path,
+    extractor_func: Callable,
+    segmentation_model,
+    postprocess_params: Dict[str, object],
+    deep_feature_extraction_model
+) -> Optional[List[Path]]:
+    try:
+        df = pd.read_csv(metadata_file)
+    except OSError as e:
+        logger.error(
+            "Cannot read metadata file %s: %s",
+            metadata_file,
+            e
+        )
+        return None
+
+    if "filepath" not in df.columns:
+        logger.warning("Skipping %s: missing filepath column", metadata_file.name)
+        return None
+
     df = df[df["filepath"].apply(os.path.exists)].sort_values("filepath")
 
     if df.empty:
-        logger.warning(f"No valid rows in {metadata_file.name}")
+        logger.warning("No valid rows in %s", metadata_file.name)
         return None
 
     prefix = metadata_file.stem
-
-    logger.warning(f"{metadata_file.name}: {len(df)} rows")
+    logger.info("%s: %s valid rows", metadata_file.name, len(df))
 
     shard_files = await extract_features_parallel(
-        df,
-        extractor_func,
-        model,
-        output_dir,
-        prefix
+        df=df,
+        extractor_func=extractor_func,
+        segmentation_model=segmentation_model,
+        postprocess_params=postprocess_params,
+        output_dir=output_dir,
+        prefix=prefix,
+        deep_feature_extraction_model=deep_feature_extraction_model
     )
 
-    logger.info(f"Pushpinder Shard Files {shard_files} classes, Prefix {prefix}")
+    logger.info("Shard files for %s: %s", prefix, shard_files)
 
-    if not shard_files:
-        return None
+    return shard_files or None
 
-    return shard_files
-
-# ----------------------------
-# PIPELINE ENTRYPOINT
-# ----------------------------
 async def run_pipeline_with_extract(
-        metadata_dir: str,
-        output_dir: str,
-        features_dim: int,
-        folds: int,
-        extractor_func,
-        model
+    metadata_dir: str,
+    output_dir: str,
+    features_dim: int,
+    folds: int,
+    extractor_func: Callable,
+    segmentation_model,
+    postprocess_params: Dict[str, object],
+    deep_feature_extraction_model
 ):
     meta_path = Path(metadata_dir).expanduser().resolve()
     output_path = Path(output_dir).expanduser().resolve()
     output_path.mkdir(parents=True, exist_ok=True)
 
-    logger.warning(f"Metadata Path: {meta_path}")
+    logger.info("Metadata path: %s", meta_path)
+    logger.info("Output path: %s", output_path)
 
     metadata_files = get_metadata_files()
+
     if not metadata_files:
         raise RuntimeError("No metadata CSV files found")
 
-    logger.warning(f"Metadata Files: {metadata_files}")
-
-    label_encoder, label_mapping, labels = build_global_label_mapping(
+    build_global_label_mapping(
         metadata_files,
-        output_path / "label_mapping.json"
+        output_path / "label_mapping.json",
     )
 
-    executor = ProcessPoolExecutor(1)
+    all_shard_files: List[Path] = []
 
-    logger.warning(f"Pushpinder output_path: {output_path}")
-    all_shard_files = []
     for metadata_file in metadata_files:
         shard_files = await process_metadata_file(
-                metadata_file,
-                output_path,
-                executor,
-                extractor_func,
-                model
-            )
+            metadata_file=metadata_file,
+            output_dir=output_path,
+            extractor_func=extractor_func,
+            segmentation_model=segmentation_model,
+            postprocess_params=postprocess_params,
+            deep_feature_extraction_model=deep_feature_extraction_model
+        )
 
         if shard_files:
             all_shard_files.extend(shard_files)
 
-        # if not shard_files:
-        #     continue
-
-
-        # all_shard_files.append(shard_files)
-
     if not all_shard_files:
         raise RuntimeError("No features extracted")
 
-    reduced_feature_files = run_incremental_pca(all_shard_files, features_dim, output_path, "global")
+    reduced_feature_files = run_incremental_pca(
+        shard_files=all_shard_files,
+        features_dim=950,
+        output_dir=output_path,
+        prefix="global",
+        explained_variance=0.99,
+    )
 
-    logger.info(f"Reduced Feature Files: {reduced_feature_files}")
-
-    # labels = label_encoder.fit_transform(labels)
-    #
-    # logger.info(f"Reduced Feature Matrix Shape: {reduced_features.shape}")
-    #
-    # X = np.vstack(reduced_features)
-    # y = np.array(labels)
-    #
-    # create_stratified_folds(X, y, output_path, folds)
+    logger.info("Reduced feature files: %s", reduced_feature_files)
 
 def create_stratified_folds(X, y, output_dir, n_splits=5):
-
     if len(X) < 2:
-        print("Not enough samples")
+        logger.warning("Not enough samples")
         return
 
     from collections import Counter
+
     min_class_samples = min(Counter(y).values())
 
     if min_class_samples < n_splits:
         n_splits = min_class_samples
 
     if n_splits < 2:
-        print("Not enough samples per class")
+        logger.warning("Not enough samples per class")
         return
 
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
 
-    i = 1
-    for train_index, test_index in skf.split(X, y):
-        X_train = X[train_index]
-        X_test = X[test_index]
+    for i, (train_index, test_index) in enumerate(skf.split(X, y), 1):
+        np.save(output_dir / f"x_train_{i}.npy", X[train_index])
+        np.save(output_dir / f"y_train_{i}.npy", y[train_index])
+        np.save(output_dir / f"x_test_{i}.npy", X[test_index])
+        np.save(output_dir / f"y_test_{i}.npy", y[test_index])
 
-        y_train = y[train_index]
-        y_test = y[test_index]
-
-        np.save(output_dir / f"x_train_{i}.npy", X_train)
-        np.save(output_dir / f"y_train_{i}.npy", y_train)
-        np.save(output_dir / f"x_test_{i}.npy", X_test)
-        np.save(output_dir / f"y_test_{i}.npy", y_test)
-
-        i += 1
-
-# ----------------------------
-# UTILITY
-# ----------------------------
 def get_valid_segmentation_image_paths(
     extensions: Iterable[str] = ("png", "jpg", "jpeg"),
     path_column: str = "filepath",
 ) -> List[str]:
-    """
-    Collect valid image paths from cached metadata CSV files.
-    """
-
-    # Defensive check (catches this bug immediately)
     if isinstance(extensions, (str, Path)):
-        raise TypeError(
-            f"`extensions` must be an iterable of strings, got {type(extensions)}"
-        )
+        raise TypeError(f"`extensions` must be iterable of strings, got {type(extensions)}")
 
     extensions = tuple(ext.lower().lstrip(".") for ext in extensions)
     paths: List[str] = []
 
     for csv_file in get_metadata_files():
-        df = pd.read_csv(csv_file, usecols=[path_column])
-
-        mask = (
-            df[path_column]
-            .astype(str)
-            .str.lower()
-            .str.endswith(extensions)
-        )
-
-        paths.extend(df.loc[mask, path_column].tolist())
+        try:
+            df = pd.read_csv(csv_file, usecols=[path_column])
+            mask = df[path_column].astype(str).str.lower().str.endswith(extensions)
+            paths.extend(df.loc[mask, path_column].tolist())
+        except Exception as exc:
+            logger.warning("Skipping %s while collecting image paths: %s", csv_file, exc)
 
     return sorted(paths)
 
-# ----------------------------
-# PUBLIC API
-# ----------------------------
 async def extract_1(metadata_file_path: str):
-    model = get_segmentation_mask_model(get_valid_segmentation_image_paths())
+    segmentation_model, postprocess_params = get_segmentation_assets()
+    deep_feature_extraction_model = get_densenet_extractor()
+
     await run_pipeline_with_extract(
         metadata_dir=metadata_file_path,
         output_dir="/data/features/image",
         features_dim=950,
         folds=5,
         extractor_func=Factory.extractor,
-        model= model
+        segmentation_model=segmentation_model,
+        postprocess_params=postprocess_params,
+        deep_feature_extraction_model=deep_feature_extraction_model
     )

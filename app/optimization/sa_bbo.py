@@ -1,156 +1,270 @@
-# Self-Adaptive Brown-Bear Optimization Algorithm
-import glob
+from __future__ import annotations
+
 import logging
-import os
-from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Sequence, Tuple
 
-import numpy as np
-
-from app.model.fcn import fcn_model, apply_mask
-from skimage.metrics import peak_signal_noise_ratio
 import cv2
+import numpy as np
 
 logger = logging.getLogger("feature_pipeline")
 
-def process_image(img_path, model):
-    try:
-        original_image = cv2.imread(img_path)
+@dataclass(frozen=True)
+class ESIBBOConfig:
+    pop_size: int = 10
+    epochs: int = 25
+    elite_size: int = 2
+    patience: int = 6
 
-        if original_image is None:
-            return None
+    alpha_max: float = 0.9
+    alpha_min: float = 0.2
+    beta_min: float = 0.1
+    beta_max: float = 0.8
 
-        original_image = cv2.resize(original_image, (256, 256))
+    levy_probability: float = 0.25
+    mutation_probability: float = 0.35
+    mu_max: float = 0.12
+    chaotic_r: float = 3.99
 
-        prediction = model.predict(np.expand_dims(original_image, axis=0))
-        segmented = apply_mask(original_image, prediction[0])
-        segmented = cv2.cvtColor(segmented, cv2.COLOR_GRAY2BGR)
+    dice_weight: float = 0.40
+    iou_weight: float = 0.35
+    boundary_weight: float = 0.20
+    complexity_weight: float = 0.05
 
-        return peak_signal_noise_ratio(original_image, segmented)
-    except Exception as e:
-        print(f" Error processing {img_path}: {e}")
-        return None
+@dataclass
+class ESIBBOResult:
+    best_solution: np.ndarray
+    best_fitness: float
+    best_params: Dict[str, object]
+    history: List[float]
 
-def objective_func_1(x, input_shape, reference_images):
-    val = max(1, x[0].astype('int32'))
-    dilation_rate = (val, val)
-    learning_rate = x[1]
+def default_bounds() -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Optimized post-processing vector:
+        threshold, morph_kernel, close_iter, open_iter, min_area_ratio
+    """
+    lb = np.array([0.20, 3, 0, 0, 0.001], dtype=np.float64)
+    ub = np.array([0.80, 9, 3, 2, 0.080], dtype=np.float64)
+    return lb, ub
 
-    model = fcn_model(input_shape, dilation_rate, learning_rate)
+def decode_solution(x: np.ndarray) -> Dict[str, object]:
+    kernel = int(round(float(x[1])))
+    if kernel % 2 == 0:
+        kernel += 1
 
-    if not reference_images:
-        print("No validation images found.")
-        return float('inf')  # Return poor score
+    return {
+        "threshold": float(np.clip(x[0], 0.20, 0.80)),
+        "morph_kernel": int(np.clip(kernel, 3, 9)),
+        "close_iter": int(np.clip(round(float(x[2])), 0, 3)),
+        "open_iter": int(np.clip(round(float(x[3])), 0, 2)),
+        "min_area_ratio": float(np.clip(x[4], 0.001, 0.080)),
+    }
 
-    psnr_scores = []
+def dice_score(y_true: np.ndarray, y_pred: np.ndarray, eps: float = 1e-7) -> float:
+    y_true = y_true.astype(np.float32).ravel()
+    y_pred = y_pred.astype(np.float32).ravel()
+    inter = np.sum(y_true * y_pred)
+    return float((2.0 * inter + eps) / (np.sum(y_true) + np.sum(y_pred) + eps))
 
-    # for reference_image in reference_images:
-    #     psnr_scores.append(process_image(reference_image, model))
+def iou_score(y_true: np.ndarray, y_pred: np.ndarray, eps: float = 1e-7) -> float:
+    y_true = y_true.astype(np.float32).ravel()
+    y_pred = y_pred.astype(np.float32).ravel()
+    inter = np.sum(y_true * y_pred)
+    union = np.sum(y_true) + np.sum(y_pred) - inter
+    return float((inter + eps) / (union + eps))
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = [executor.submit(process_image, reference_image, model) for reference_image in reference_images]
-        for future in futures:
-            result = future.result()
-            if result is not None:
-                psnr_scores.append(result)
+def boundary_loss(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    true_edge = cv2.Canny((y_true * 255).astype(np.uint8), 50, 150) > 0
+    pred_edge = cv2.Canny((y_pred * 255).astype(np.uint8), 50, 150) > 0
+    return 1.0 - dice_score(true_edge.astype(np.uint8), pred_edge.astype(np.uint8))
 
-    # If no valid PSNRs, return bad score
-    if not psnr_scores:
-        return float('inf')
+def postprocess_mask(prob_mask: np.ndarray, params: Dict[str, object]) -> np.ndarray:
+    if prob_mask.ndim == 3:
+        prob_mask = prob_mask[..., 0]
 
-    return 1 / np.mean(psnr_scores)
+    mask = (prob_mask >= float(params["threshold"])).astype(np.uint8)
 
-def objective_func(x, input_shape, reference_images):
-    # dilation_rate = x[0].astype('int32')
-    # learning_rate = x[1]
-    # input_shape = (256, 256, 3)
+    k = int(params["morph_kernel"])
+    if k % 2 == 0:
+        k += 1
 
-    val = max(1, x[0].astype('int32'))
-    dilation_rate = (val, val)
-    learning_rate = x[1]
+    kernel = np.ones((k, k), np.uint8)
 
-    original_image = cv2.imread(str('/data/raw/images/chest/cts/train/large.cell.carcinoma_left.hilum_T2_N2_M0_IIIa/000017.png'))
-    original_image = cv2.resize(original_image, (256, 256))
+    close_iter = int(params.get("close_iter", 0))
+    open_iter = int(params.get("open_iter", 0))
 
-    model = fcn_model(input_shape, dilation_rate, learning_rate)
-    # Predict segmentation mask using the FCN model
-    segmentation_mask = model.predict(np.expand_dims(original_image, axis=0))
+    if close_iter > 0:
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=close_iter)
 
-    # Apply segmentation mask to input image
-    segmented_image = apply_mask(original_image, segmentation_mask[0])
-    segmented_image = cv2.cvtColor(segmented_image, cv2.COLOR_GRAY2BGR)
+    if open_iter > 0:
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=open_iter)
 
-    psnr = peak_signal_noise_ratio(original_image, segmented_image)
+    min_area_ratio = float(params.get("min_area_ratio", 0.005))
+    min_area = int(mask.size * min_area_ratio)
 
-    fit = 1 / psnr
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    clean = np.zeros_like(mask)
 
-    return fit
+    for label_idx in range(1, num_labels):
+        if stats[label_idx, cv2.CC_STAT_AREA] >= min_area:
+            clean[labels == label_idx] = 1
 
-def sa_bbo(lb, ub, pop_size, prob_size, epochs, input_shape, reference_images):
-    population = np.round(np.random.uniform(lb, ub, size=(pop_size, prob_size)), 4)
-    logger.info(f"Pushpinder Features in SA-BBO: Ref Images Length- {len(reference_images)}")
+    return clean.astype(np.uint8)
 
-    best_solution = population[0].copy()
-    best_fitness = objective_func(best_solution, input_shape, reference_images)
+def complexity_penalty(params: Dict[str, object]) -> float:
+    return float(
+        0.4 * ((int(params["morph_kernel"]) - 3) / 6)
+        + 0.3 * (int(params["close_iter"]) / 3)
+        + 0.2 * (int(params["open_iter"]) / 2)
+        + 0.1 * (float(params["min_area_ratio"]) / 0.080)
+    )
 
-    lb = np.array(lb)
-    ub = np.array(ub)
+def levy_flight(dim: int, beta: float = 1.5) -> np.ndarray:
+    sigma = 0.6966
+    u = np.random.normal(0, sigma, dim)
+    v = np.random.normal(0, 1, dim)
+    return u / (np.abs(v) ** (1.0 / beta) + 1e-8)
 
-    w_min = 0.1
-    w_max = 1
-    pi = np.pi
+def evaluate_candidate(
+    x: np.ndarray,
+    prob_masks: Sequence[np.ndarray],
+    gt_masks: Sequence[np.ndarray],
+    config: ESIBBOConfig,
+) -> float:
+    params = decode_solution(x)
 
-    logger.info(f"Pushpinder Features in SA-BBO: best_solution- {best_solution} for best_fitness- {best_fitness}")
-    count = 0;
-    for epoch in range(epochs):
-        theta_k = epoch / epochs
-        population = np.clip(population, lb, ub)
-        for j in range(pop_size):
+    dice_vals = []
+    iou_vals = []
+    boundary_vals = []
 
-            fitness = objective_func(population[j], input_shape, reference_images)
-            count +=1
+    for prob, gt in zip(prob_masks, gt_masks):
+        pred = postprocess_mask(prob, params)
+        gt = (gt > 0).astype(np.uint8)
 
-            logger.info(f"Pushpinder Features: best_solution- {best_solution} for best_fitness- {best_fitness}, counter: {count}")
+        dice_vals.append(dice_score(gt, pred))
+        iou_vals.append(iou_score(gt, pred))
+        boundary_vals.append(boundary_loss(gt, pred))
 
-            if fitness < best_fitness:
-                best_solution = population[j].copy()
-                best_fitness = fitness
+    dice = float(np.mean(dice_vals))
+    iou = float(np.mean(iou_vals))
+    boundary = float(np.mean(boundary_vals))
+    complexity = complexity_penalty(params)
 
-            # pedal scent marking behaviour
-            if 0 < theta_k <= epochs / 3:
-                # Update based on characteristic gait while walking
-                alpha_k = np.random.uniform(0, 1)
-                population[j] = population[j] - (theta_k * alpha_k * population[j])
+    return float(
+        config.dice_weight * (1.0 - dice)
+        + config.iou_weight * (1.0 - iou)
+        + config.boundary_weight * boundary
+        + config.complexity_weight * complexity
+    )
 
-            elif epochs / 3 < theta_k <= 2 * epochs / 3:
-                # Update based on careful stepping characteristic
-                beta_k = np.random.uniform(0, 1)
-                f_k = beta_k * theta_k
-                beta2_k = np.random.uniform(0, 1)
-                l_k = np.round(1+beta2_k)
+def opposition_init(lb: np.ndarray, ub: np.ndarray, pop_size: int, objective) -> np.ndarray:
+    pop = np.random.uniform(lb, ub, size=(pop_size, len(lb)))
+    opp = lb + ub - pop
 
-                # Improvement ------> Inertia Weight
-                w = w_max - (w_max - w_min)*(epoch / epochs)
-                population[j] = population[j] + w + f_k * (best_solution - l_k * population[j])
+    selected = []
+    for p, o in zip(pop, opp):
+        selected.append(p if objective(p) <= objective(o) else o)
 
-            else:
-                # Update based on twisting feet characteristic
-                gamma = np.random.uniform(0, 1)
+    return np.asarray(selected, dtype=np.float64)
 
-                # Improvement ------> velocity controlling parameter
-                x = (2 / (abs(2 - theta_k - np.sqrt(theta_k ** 2) - 4 * theta_k)))
-                angular_velocity = 2 * pi * theta_k * gamma * x
+def e_si_bbo_postprocess(
+    prob_masks: Sequence[np.ndarray],
+    gt_masks: Sequence[np.ndarray],
+    config: Optional[ESIBBOConfig] = None,
+) -> ESIBBOResult:
+    if len(prob_masks) != len(gt_masks):
+        raise ValueError("prob_masks and gt_masks must have equal length")
 
-                if best_solution is not None:
-                    population[j] = (
-                            population[j]
-                            + angular_velocity * (best_solution - abs(population[j]))
-                            - angular_velocity * (population[j] - abs(population[j]))
-                    )
-                # population[j] = population[j] + angular_velocity * (best_solution - abs(population[j])) - angular_velocity * (population[j] - abs(population[j]))
+    if not prob_masks:
+        raise ValueError("prob_masks cannot be empty")
 
-            # sniffing behaviour
-            if np.random.rand() < objective_func(population[j], input_shape, reference_images):
-                lamb = np.random.uniform(0, 1)
-                population[j] = population[j] + lamb * (np.max(population) - np.min(population))
+    config = config or ESIBBOConfig()
+    lb, ub = default_bounds()
+    dim = len(lb)
 
-    return best_solution, best_fitness
+    def objective(x: np.ndarray) -> float:
+        return evaluate_candidate(np.clip(x, lb, ub), prob_masks, gt_masks, config)
+
+    population = opposition_init(lb, ub, config.pop_size, objective)
+    fitness = np.asarray([objective(p) for p in population], dtype=np.float64)
+
+    best_idx = int(np.argmin(fitness))
+    best = population[best_idx].copy()
+    best_fit = float(fitness[best_idx])
+    history = [best_fit]
+
+    chaotic_x = np.random.uniform(0.2, 0.8)
+    no_improve = 0
+
+    for epoch in range(config.epochs):
+        order = np.argsort(fitness)
+        population = population[order]
+        fitness = fitness[order]
+
+        elites = population[: config.elite_size].copy()
+        current_best = population[0].copy()
+        worst = population[-1].copy()
+
+        alpha_t = config.alpha_max - (epoch / config.epochs) * (
+            config.alpha_max - config.alpha_min
+        )
+        beta_t = config.beta_min + (epoch / config.epochs) * (
+            config.beta_max - config.beta_min
+        )
+
+        chaotic_x = config.chaotic_r * chaotic_x * (1.0 - chaotic_x)
+
+        new_pop = population.copy()
+
+        for i in range(config.elite_size, config.pop_size):
+            candidate = population[i].copy()
+
+            candidate += alpha_t * chaotic_x * (current_best - candidate)
+            candidate += beta_t * np.random.rand(dim) * (candidate - worst)
+
+            if np.random.rand() < config.levy_probability:
+                candidate += levy_flight(dim) * (current_best - candidate)
+
+            if np.random.rand() < config.mutation_probability:
+                rank_ratio = (i + 1) / config.pop_size
+                mu_i = config.mu_max * rank_ratio
+                candidate += mu_i * np.random.randn(dim) * (ub - lb)
+
+            new_pop[i] = np.clip(candidate, lb, ub)
+
+        new_pop[: config.elite_size] = elites
+        new_fit = np.asarray([objective(p) for p in new_pop], dtype=np.float64)
+
+        improved = new_fit < fitness
+        population[improved] = new_pop[improved]
+        fitness[improved] = new_fit[improved]
+
+        epoch_best_idx = int(np.argmin(fitness))
+        epoch_best = float(fitness[epoch_best_idx])
+
+        if epoch_best < best_fit:
+            best_fit = epoch_best
+            best = population[epoch_best_idx].copy()
+            no_improve = 0
+        else:
+            no_improve += 1
+
+        history.append(best_fit)
+
+        logger.info(
+            "E-SI-BBO epoch=%s best_fitness=%.6f params=%s",
+            epoch + 1,
+            best_fit,
+            decode_solution(best),
+        )
+
+        if no_improve >= config.patience:
+            logger.info("E-SI-BBO early stopping at epoch=%s", epoch + 1)
+            break
+
+    return ESIBBOResult(
+        best_solution=best,
+        best_fitness=best_fit,
+        best_params=decode_solution(best),
+        history=history,
+    )
