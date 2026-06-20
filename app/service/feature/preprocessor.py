@@ -87,7 +87,7 @@ async def extract_features_parallel(
     output_dir: Path,
     prefix: str,
     deep_feature_extraction_model,
-    shard_size: int = 500,
+    shard_size: int = 1000,
 ) -> List[Path]:
     features = []
     shard_files: List[Path] = []
