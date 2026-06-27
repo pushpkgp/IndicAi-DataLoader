@@ -11,7 +11,7 @@ helm template indic-ai-data-connectors ./helm/indic-ai-data-connectors-chart -n 
 
 helm uninstall indic-ai-data-connectors -n indic-ai-data-connectors
 helm install indic-ai-data-connectors ./helm/indic-ai-data-connectors-chart -n indic-ai-data-connectors --create-namespace
-helm upgrade indic-ai-data-connectors ./helm/indic-ai-data-connectors-chart -n indic-ai-data-connectors -f ./helm/indic-ai-data-connectors-chart/values.yaml
+helm upgrade indic-ai-data-loader ./helm/indic-ai-data-loader-chart -n indic-ai-data-loader -f ./helm/indic-ai-data-loader-chart/values.yaml
 minikube image load indic-ai-data-connectors:0.0.1
 
 kubectl delete pod -n indic-ai-data-connectors --all
@@ -53,13 +53,13 @@ kubectl get pods -n indic-ai-data-loader -w
 
 helm uninstall indic-ai-data-loader -n indic-ai-data-loader
 helm install indic-ai-data-loader ./helm/indic-ai-data-loader-chart -n indic-ai-data-loader --create-namespace
-kubectl logs -n indic-ai-data-loader indic-ai-data-loader-557f8f86d6-4xnjp
+kubectl logs -n indic-ai-data-loader indic-ai-data-loader-ff96998bc-qsknn
 
-kubectl logs indic-ai-data-loader-5ddf45bcd8-8r282 -n indic-ai-data-loader --previous
+kubectl logs indic-ai-data-loader-864795c86f-ftl2 -n indic-ai-data-loader --previous
 
-kubectl port-forward -n indic-ai-data-loader pod/indic-ai-data-loader-557f8f86d6-4xnjp 9080:8000
+kubectl port-forward -n indic-ai-data-loader pod/indic-ai-data-loader-ff96998bc-qsknn 9080:8000
 
-kubectl exec -it indic-ai-data-loader-557f8f86d6-4xnjp -n indic-ai-data-loader -- bash
+kubectl exec -it indic-ai-data-loader-6fdf996549-m5vvk -n indic-ai-data-loader -- bash
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------
 minikube stop
 minikube start
@@ -139,4 +139,4 @@ sudo mkdir -p /data
 sudo chmod -R 777 /data
 nohup minikube mount /Users/pushpinderrana/IndicAI/data:/data > ~/minikube-data-mount.log 2>&1 &
 kubectl rollout restart deployment indic-ai-data-loader -n indic-ai-data-loader
-kubectl exec -it -n indic-ai-data-loader deploy/indic-ai-data-loader -- ls -lah /data/metadata/image | head
+kubectl exec -it -n indic-ai-data-loader deploy/indic-ai-data-loader -- ls -lah /data | head

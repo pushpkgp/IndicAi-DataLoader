@@ -27,9 +27,9 @@ spec:
             - name: raw-data
               mountPath: /data/raw
             - name: metadata-image
-              mountPath: /data/metadata/image
+              mountPath: /data/metadata
             - name: features-image
-              mountPath: /data/features/image
+              mountPath: /data/features
       volumes:
         - name: raw-data
           hostPath:
@@ -37,9 +37,9 @@ spec:
             type: Directory
         - name: metadata-image
           hostPath:
-            path: /data/metadata/image
+            path: /data/metadata
             type: Directory
         - name: features-image
           hostPath:
-            path: /data/features/image
+            path: /data/features
             type: DirectoryOrCreate

@@ -3,7 +3,7 @@ from tensorflow.keras.models import Model
 
 _DENSENET_EXTRACTOR = None
 
-def get_densenet_extractor():
+def get_densenet_extractor_model():
     global _DENSENET_EXTRACTOR
 
     if _DENSENET_EXTRACTOR is None:
